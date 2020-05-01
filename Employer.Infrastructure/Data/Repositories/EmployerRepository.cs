@@ -23,8 +23,18 @@ namespace Employer.Infrastructure.Data.Repositories
 
         public async Task<int> Create(Domain.Models.Employer entity)
         {
-            await _context.Employers.AddAsync(entity);
-            return entity.Id;
+            try
+            {
+                await _context.Employers.AddAsync(entity);
+                await _context.SaveChangesAsync();
+                return entity.Id;
+            }
+            catch (Exception ex)
+            {
+                var p = ex;
+            }
+
+            return 0;
         }
     }
 }

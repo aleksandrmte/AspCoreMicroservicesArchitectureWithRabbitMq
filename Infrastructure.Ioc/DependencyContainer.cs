@@ -8,11 +8,13 @@ using Employer.Infrastructure.Data.Repositories;
 using Infrastructure.Bus;
 using Management.Application.Interfaces;
 using Management.Application.Services;
-using Management.Domain.Commands.CreateUser;
+using Management.Domain.Commands.CreateEmployer;
 using Management.Domain.Interfaces;
 using Management.Infrastructure.Data;
 using Management.Infrastructure.Data.Repositories;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Infrastructure.Ioc
@@ -25,14 +27,14 @@ namespace Infrastructure.Ioc
             services.AddSingleton<IEventBus, RabbitMqBus>(sp =>
             {
                 var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
-                return new RabbitMqBus(sp.GetService<IMediator>(), scopeFactory);
+                return new RabbitMqBus(sp.GetService<IMediator>(), scopeFactory, sp.GetService<IConfiguration>());
             });
 
             //Subscriptions
             services.AddTransient<EmployerCreatedEventHandler>();
 
             //Domain Commands
-            services.AddTransient<IRequestHandler<CreateUserCommand, bool>, CreateUserCommandHandler>();
+            services.AddTransient<IRequestHandler<CreateEmployerCommand, bool>, CreateEmployerCommandHandler>();
 
             //Domain Events
             services.AddTransient<IEventHandler<EmployerCreatedEvent>, EmployerCreatedEventHandler>();

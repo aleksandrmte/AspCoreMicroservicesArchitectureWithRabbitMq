@@ -8,7 +8,7 @@ namespace Core.Bus.Domain.Bus
     {
         Task SendCommand<TCommand>(TCommand command) where TCommand : Command;
         void Publish<TEvent>(TEvent @event) where TEvent : Event;
-        void Subscribe<TEvent, THandler>()
+        void Subscribe<TEvent, THandler>(string subscriberName)
             where TEvent : Event
             where THandler : IEventHandler;
     }

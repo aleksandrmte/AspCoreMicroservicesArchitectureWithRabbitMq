@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Text;
 using Core.Bus.Domain.Events;
 
-namespace Management.Domain.Events.CreateUser
+namespace Management.Domain.Events.CreateEmployer
 {
-    public class UserCreatedEvent: Event
+    public class EmployerCreatedEvent: Event
     {
         public string FirstName { get; set; }
         public string LastName { get; set; }
         public string Email { get; set; }
 
-        public UserCreatedEvent(string firstName, string lastName, string email)
+        public EmployerCreatedEvent(string firstName, string lastName, string email)
         {
             FirstName = firstName;
             LastName = lastName;

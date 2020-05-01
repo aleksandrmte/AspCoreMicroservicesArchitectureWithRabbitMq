@@ -16,7 +16,7 @@ namespace Web.Services
 
         public async Task Create(UserDto userDto)
         {
-            var uri = "https://localhost:5001/api/Management";//TO DO: Move to appsettings
+            var uri = "https://localhost:5001/api/Management";
             var content = new StringContent(
                 JsonConvert.SerializeObject(userDto),
                 System.Text.Encoding.UTF8,

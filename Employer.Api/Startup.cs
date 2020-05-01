@@ -1,3 +1,4 @@
+using System;
 using Core.Bus.Domain.Bus;
 using Employer.Domain.Events.CreateEmployer;
 using Employer.Infrastructure.Data;
@@ -72,7 +73,7 @@ namespace Employer.Api
         private static void ConfigureEventBus(IApplicationBuilder app)
         {
             var eventBus = app.ApplicationServices.GetRequiredService<IEventBus>();
-            eventBus.Subscribe<EmployerCreatedEvent, EmployerCreatedEventHandler>();
+            eventBus.Subscribe<EmployerCreatedEvent, EmployerCreatedEventHandler>(AppDomain.CurrentDomain.FriendlyName);
         }
     }
 }

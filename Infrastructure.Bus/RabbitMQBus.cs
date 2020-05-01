@@ -11,23 +11,39 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 
 namespace Infrastructure.Bus
 {
     public sealed class RabbitMqBus : IEventBus
     {
-        private const string Hostname = "localhost";
+        private readonly IConnection _connection;
+
+        private IModel _channel;
+
+        public IModel Channel
+        {
+            get { return _channel ??= _connection.CreateModel(); }
+        }
+        
         private readonly IMediator _mediator;
-        private readonly Dictionary<string, List<Type>> _handlers;
-        private readonly List<Type> _eventTypes;
         private readonly IServiceScopeFactory _serviceScopeFactory;
 
-        public RabbitMqBus(IMediator mediator, IServiceScopeFactory serviceScopeFactory)
+        public RabbitMqBus(IMediator mediator, IServiceScopeFactory serviceProvider, IConfiguration config)
         {
             _mediator = mediator;
-            _serviceScopeFactory = serviceScopeFactory;
-            _handlers = new Dictionary<string, List<Type>>();
-            _eventTypes = new List<Type>();
+            _serviceScopeFactory = serviceProvider;
+
+            var connectionFactory = new ConnectionFactory
+            {
+                HostName = config["EventBus:HostName"],
+                Port = int.Parse(config["EventBus:Port"]),
+                UserName = config["EventBus:UserName"],
+                Password = config["EventBus:Password"],
+                DispatchConsumersAsync = true
+            };
+            _connection = connectionFactory.CreateConnection();
+
         }
 
         public Task SendCommand<TCommand>(TCommand command) where TCommand : Command
@@ -37,89 +53,60 @@ namespace Infrastructure.Bus
 
         public void Publish<TEvent>(TEvent @event) where TEvent : Event
         {
-            var factory = new ConnectionFactory { HostName = Hostname };
-            using var connection = factory.CreateConnection();
-            using var channel = connection.CreateModel();
-            var eventName = @event.GetType().Name;
-            channel.QueueDeclare(eventName, false, false, false, null);
+            var exchangeName = @event.GetType().Name;
+            CreateExchangeIfNotExists(exchangeName);
 
             var message = JsonConvert.SerializeObject(@event);
-            var body = Encoding.UTF8.GetBytes(message);
+            var bytesEvent = Encoding.UTF8.GetBytes(message);
 
-            channel.BasicPublish("", eventName, null, body);
+            Channel.BasicPublish(exchangeName, string.Empty, body: bytesEvent);
         }
 
-        public void Subscribe<TEvent, THandler>()
+        private void CreateExchangeIfNotExists(string exchangeName)
+        {
+            Channel.ExchangeDeclare(exchangeName, ExchangeType.Fanout, true);
+        }
+
+        public void Subscribe<TEvent, THandler>(string subscriberName)
             where TEvent : Event
             where THandler : IEventHandler
         {
-            var eventName = typeof(TEvent).Name;
-            var handlerType = typeof(THandler);
+            var exchangeName = typeof(TEvent).Name;
+            BindQueue(exchangeName, subscriberName);
 
-            if (!_eventTypes.Contains(typeof(TEvent)))
-                _eventTypes.Add(typeof(TEvent));
-
-            if (!_handlers.ContainsKey(eventName))
-                _handlers.Add(eventName, new List<Type>());
-
-            if (_handlers[eventName].Any(h => h.GetType() == handlerType))
-                throw new ArgumentException($"Handler Type {handlerType.Name} already registered for {eventName}", nameof(handlerType));
-
-            _handlers[eventName].Add(handlerType);
-
-            StartBasicConsume<TEvent>();
+            var consumer = new AsyncEventingBasicConsumer(Channel);
+            StartBasicConsume<TEvent>(consumer, subscriberName);
         }
 
-        private void StartBasicConsume<TEvent>() where TEvent : Event
+        private void BindQueue(string exchangeName, string subscriberName)
         {
-            var factory = new ConnectionFactory
-            {
-                HostName = Hostname,
-                DispatchConsumersAsync = true
-            };
-            var connection = factory.CreateConnection();
+            CreateExchangeIfNotExists(exchangeName);
 
-            var channel = connection.CreateModel();
-            var eventName = typeof(TEvent).Name;
-            channel.QueueDeclare(eventName, false, false, false, null);
-
-            var consumer = new AsyncEventingBasicConsumer(channel);
-            consumer.Received += Consumer_Received;
-            channel.BasicConsume(eventName, true, consumer);
+            Channel.QueueDeclare(subscriberName, true, false, autoDelete: false);
+            Channel.QueueBind(subscriberName, exchangeName, string.Empty);
         }
 
-        private async Task Consumer_Received(object sender, BasicDeliverEventArgs e)
+        private void StartBasicConsume<TEvent>(AsyncEventingBasicConsumer consumer, string subscriberName) where TEvent : Event
         {
-            var eventName = e.RoutingKey;
-            var message = Encoding.UTF8.GetString(e.Body.ToArray());
+            consumer.Received += Consumer_Received<TEvent>;
+            Channel.BasicConsume(subscriberName, false, consumer);
+        }
+
+        private async Task Consumer_Received<TEvent>(object sender, BasicDeliverEventArgs args) where TEvent : Event
+        {
+            var jsonMessage = Encoding.UTF8.GetString(args.Body.ToArray());
+            var message = JsonConvert.DeserializeObject<TEvent>(jsonMessage);
 
             try
             {
-                await ProcessEvent(eventName, message).ConfigureAwait(false);
+                using var scope = _serviceScopeFactory.CreateScope();
+                var handler = scope.ServiceProvider.GetRequiredService<IEventHandler<TEvent>>();
+                await handler.Handle(message);
+                Channel.BasicAck(args.DeliveryTag, false);
             }
             catch (Exception)
             {
                 // ignored
-            }
-        }
-
-        private async Task ProcessEvent(string eventName, string message)
-        {
-            if (_handlers.ContainsKey(eventName))
-            {
-                using var scope = _serviceScopeFactory.CreateScope();
-                var subscriptions = _handlers[eventName];
-                foreach (var sub in subscriptions)
-                {
-                    var handler = scope.ServiceProvider.GetService(sub);
-                    if (handler == null)
-                        continue;
-                    var eventType = _eventTypes.SingleOrDefault(t => t.Name == eventName);
-                    var @event = JsonConvert.DeserializeObject(message, eventType);
-                    var concreteType = typeof(IEventHandler<>).MakeGenericType(eventType);
-
-                    await (Task)concreteType.GetMethod("Handle").Invoke(handler, new[] { @event });
-                }
             }
         }
     }

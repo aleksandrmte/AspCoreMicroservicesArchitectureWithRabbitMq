@@ -1,32 +1,29 @@
 ﻿using Core.Bus.Domain.Bus;
 using Management.Application.Dto;
 using Management.Application.Interfaces;
-using Management.Domain.Commands.CreateUser;
-using Management.Domain.Interfaces;
 using System.Threading.Tasks;
+using Management.Domain.Commands.CreateEmployer;
 
 namespace Management.Application.Services
 {
     public class UserService: IUserService
     {
-        private readonly IUserRepository _userRepository;
         private readonly IEventBus _bus;
 
-        public UserService(IUserRepository userRepository, IEventBus bus)
+        public UserService(IEventBus bus)
         {
-            _userRepository = userRepository;
             _bus = bus;
         }
         
         public async Task Create(UserDto user)
         {
-            var createTransferCommand = new CreateUserCommand(
+            var createUserCommand = new CreateEmployerCommand(
                 user.FirstName,
                 user.LastName,
                 user.Email
             );
 
-            await _bus.SendCommand(createTransferCommand);
+            await _bus.SendCommand(createUserCommand);
         }
     }
 }

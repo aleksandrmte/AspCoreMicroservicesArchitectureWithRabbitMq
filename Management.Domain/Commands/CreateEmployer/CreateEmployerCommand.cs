@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Text;
 using Core.Bus.Domain.Commands;
 
-namespace Management.Domain.Commands.CreateUser
+namespace Management.Domain.Commands.CreateEmployer
 {
-    public class CreateUserCommand: Command
+    public class CreateEmployerCommand: Command
     {
         public string FirstName { get; set; }
         public string LastName { get; set; }
         public string Email { get; set; }
 
-        public CreateUserCommand(string firstName, string lastName, string email)
+        public CreateEmployerCommand(string firstName, string lastName, string email)
         {
             FirstName = firstName;
             LastName = lastName;
