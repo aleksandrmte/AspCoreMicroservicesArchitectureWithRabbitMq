@@ -14,17 +14,15 @@ namespace Employer.Domain.Events.CreateEmployer
             _employerRepository = employerRepository;
         }
 
-        public  Task Handle(EmployerCreatedEvent @event)
+        public async Task Handle(EmployerCreatedEvent @event)
         {
-            _employerRepository.Create(new Models.Employer
+            await _employerRepository.Create(new Models.Employer
             {
                 Email = @event.Email,
                 FirstName = @event.FirstName,
                 LastName = @event.LastName,
                 BeginningOfWork = DateTime.UtcNow
             });
-
-            return Task.CompletedTask;
         }
     }
 }
