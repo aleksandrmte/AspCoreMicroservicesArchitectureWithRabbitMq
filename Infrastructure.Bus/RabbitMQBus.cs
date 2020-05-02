@@ -17,24 +17,16 @@ namespace Infrastructure.Bus
 {
     public sealed class RabbitMqBus : IEventBus
     {
-        private readonly IConnection _connection;
-
-        private IModel _channel;
-
-        public IModel Channel
-        {
-            get { return _channel ??= _connection.CreateModel(); }
-        }
-        
         private readonly IMediator _mediator;
         private readonly IServiceScopeFactory _serviceScopeFactory;
+        private readonly IConnectionFactory _connectionFactory;
 
         public RabbitMqBus(IMediator mediator, IServiceScopeFactory serviceProvider, IConfiguration config)
         {
             _mediator = mediator;
             _serviceScopeFactory = serviceProvider;
 
-            var connectionFactory = new ConnectionFactory
+            _connectionFactory = new ConnectionFactory
             {
                 HostName = config["EventBus:HostName"],
                 Port = int.Parse(config["EventBus:Port"]),
@@ -42,8 +34,6 @@ namespace Infrastructure.Bus
                 Password = config["EventBus:Password"],
                 DispatchConsumersAsync = true
             };
-            _connection = connectionFactory.CreateConnection();
-
         }
 
         public Task SendCommand<TCommand>(TCommand command) where TCommand : Command
@@ -53,18 +43,21 @@ namespace Infrastructure.Bus
 
         public void Publish<TEvent>(TEvent @event) where TEvent : Event
         {
+            using var connection = _connectionFactory.CreateConnection();
+            using var channel = connection.CreateModel();
+
             var exchangeName = @event.GetType().Name;
-            CreateExchangeIfNotExists(exchangeName);
+            CreateExchangeIfNotExists(channel, exchangeName);
 
             var message = JsonConvert.SerializeObject(@event);
             var bytesEvent = Encoding.UTF8.GetBytes(message);
 
-            Channel.BasicPublish(exchangeName, string.Empty, body: bytesEvent);
+            channel.BasicPublish(exchangeName, string.Empty, body: bytesEvent);
         }
 
-        private void CreateExchangeIfNotExists(string exchangeName)
+        private static void CreateExchangeIfNotExists(IModel channel, string exchangeName)
         {
-            Channel.ExchangeDeclare(exchangeName, ExchangeType.Fanout, true);
+            channel.ExchangeDeclare(exchangeName, ExchangeType.Fanout, true);
         }
 
         public void Subscribe<TEvent, THandler>(string subscriberName)
@@ -72,42 +65,43 @@ namespace Infrastructure.Bus
             where THandler : IEventHandler
         {
             var exchangeName = typeof(TEvent).Name;
-            BindQueue(exchangeName, subscriberName);
+            var connection = _connectionFactory.CreateConnection();
+            var channel = connection.CreateModel();
 
-            var consumer = new AsyncEventingBasicConsumer(Channel);
-            StartBasicConsume<TEvent>(consumer, subscriberName);
+            BindQueue(channel, exchangeName, subscriberName);
+
+            var consumer = new AsyncEventingBasicConsumer(channel);
+            StartBasicConsume<TEvent>(channel, consumer, subscriberName);
         }
 
-        private void BindQueue(string exchangeName, string subscriberName)
+        private static void BindQueue(IModel channel, string exchangeName, string subscriberName)
         {
-            CreateExchangeIfNotExists(exchangeName);
+            CreateExchangeIfNotExists(channel, exchangeName);
 
-            Channel.QueueDeclare(subscriberName, true, false, autoDelete: false);
-            Channel.QueueBind(subscriberName, exchangeName, string.Empty);
+            channel.QueueDeclare(subscriberName, true, false, autoDelete: false);
+            channel.QueueBind(subscriberName, exchangeName, string.Empty);
         }
 
-        private void StartBasicConsume<TEvent>(AsyncEventingBasicConsumer consumer, string subscriberName) where TEvent : Event
+        private void StartBasicConsume<TEvent>(IModel channel, AsyncEventingBasicConsumer consumer, string subscriberName) where TEvent : Event
         {
-            consumer.Received += Consumer_Received<TEvent>;
-            Channel.BasicConsume(subscriberName, false, consumer);
-        }
-
-        private async Task Consumer_Received<TEvent>(object sender, BasicDeliverEventArgs args) where TEvent : Event
-        {
-            var jsonMessage = Encoding.UTF8.GetString(args.Body.ToArray());
-            var message = JsonConvert.DeserializeObject<TEvent>(jsonMessage);
-
-            try
+            consumer.Received += async (obj, args) =>
             {
-                using var scope = _serviceScopeFactory.CreateScope();
-                var handler = scope.ServiceProvider.GetRequiredService<IEventHandler<TEvent>>();
-                await handler.Handle(message);
-                Channel.BasicAck(args.DeliveryTag, false);
-            }
-            catch (Exception)
-            {
-                // ignored
-            }
+                var jsonMessage = Encoding.UTF8.GetString(args.Body.ToArray());
+                var message = JsonConvert.DeserializeObject<TEvent>(jsonMessage);
+
+                try
+                {
+                    using var scope = _serviceScopeFactory.CreateScope();
+                    var handler = scope.ServiceProvider.GetRequiredService<IEventHandler<TEvent>>();
+                    await handler.Handle(message);
+                    channel.BasicAck(args.DeliveryTag, false);
+                }
+                catch (Exception)
+                {
+                    // ignored
+                }
+            };
+            channel.BasicConsume(subscriberName, false, consumer);
         }
     }
 }
